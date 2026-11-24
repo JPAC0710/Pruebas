@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Metamorfosis biopoética</title>
+<style>
+:root{color-scheme:dark;--bg:#05060c;--fg:#dfe9ff;--dim:#7d8bb0;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:Georgia,"Times New Roman",serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#intro{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;background:rgba(5,6,12,.82);z-index:5}
+#intro h1{font-weight:400;font-size:clamp(24px,6vw,44px);letter-spacing:.1em;margin:0}
+#intro p{max-width:440px;color:var(--dim);line-height:1.5;margin:0;font-size:15px}
+button{background:none;border:1px solid var(--fg);color:var(--fg);padding:12px 24px;border-radius:40px;font:inherit;letter-spacing:.1em;cursor:pointer}
+#hud{position:fixed;left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom,0px));font-size:11px;letter-spacing:.14em;color:var(--dim);display:none;justify-content:space-between;align-items:center;z-index:3;pointer-events:none;flex-wrap:wrap;gap:8px}
+.b{display:inline-block;width:46px;height:3px;background:rgba(255,255,255,.12);vertical-align:middle;margin-left:5px}
+.b i{display:block;height:100%;width:0;background:var(--fg)}
+#st{color:var(--fg);font-size:13px}
+#note{position:fixed;left:16px;right:16px;top:calc(14px + env(safe-area-inset-top,0px));padding:12px 14px;border:1px solid var(--dim);border-radius:14px;background:rgba(5,6,12,.88);color:var(--fg);font-size:13px;line-height:1.45;z-index:6;display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="st"></span><span>LATERAL<span class="b"><i id="bl"></i></span> LANZAR<span class="b"><i id="bt"></i></span> MUÑECA<span class="b"><i id="bw"></i></span></span></div>
+<div id="note"></div>
+<div id="intro">
+  <h1>METAMORFOSIS</h1>
+  <p>Todo nace como onda y se transforma: célula, micelio, flor, medusa, y vuelve a la onda. Tu movimiento acelera el cambio.</p>
+  <p>Lateral con el cuerpo: transforma. Lanzar como en ping pong: pelota que rebota y siembra esporas. Muñeca: pequeñas ondulaciones.</p>
+  <button id="go">ACTIVAR CÁMARA</button>
+  <button id="demo" style="border-color:var(--dim);color:var(--dim)">PROBAR CON EL DEDO O RATÓN</button>
+  <p style="font-size:12px">En el celular: apoya el teléfono a 2–3 m, cámara frontal, cuerpo completo visible. Con el dedo: arrastra rápido (lateral), toca (lanzar), mueve despacio (muñeca).</p>
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+let W,H,DPR;
+function rs(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.fillStyle='#05060c';ctx.fillRect(0,0,W,H)}
+addEventListener('resize',rs);rs();
+
+const N=34,M=80,GW=48,GH=36,NAMES=['ONDA','CÉLULA','MICELIO','FLOR','MEDUSA'],HU=[195,315,45,140,265];
+const vid=document.createElement('video');vid.playsInline=true;vid.muted=true;vid.setAttribute('playsinline','');
+const sm=document.createElement('canvas');sm.width=GW;sm.height=GH;
+const sx=sm.getContext('2d',{willReadFrequently:true});
+let useCam=false,prev=null,prevCx=.5,cxs=.5,cys=.5;
+let lat=0,vxs=0,thr=0,wr=0,phase=0,s=0,kick=0,lastThrow=0,lastWr=0,lastF=-1;
+let pulses=[],ball=null,spores=[];
+let px=0,py=0,T=0,cx,cy,R,A,gap;
+
+function analyse(){
+  if(vid.readyState<2)return;
+  sx.save();sx.translate(GW,0);sx.scale(-1,1);sx.drawImage(vid,0,0,GW,GH);sx.restore();
+  const d=sx.getImageData(0,0,GW,GH).data,g=new Float32Array(GW*GH);
+  for(let i=0;i<g.length;i++)g[i]=d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11;
+  let n=0,mx=0,my=0;
+  if(prev)for(let i=0;i<g.length;i++){if(Math.abs(g[i]-prev[i])>26){n++;mx+=i%GW;my+=(i/GW)|0}}
+  prev=g;
+  feed(n,n?mx/n/GW:prevCx,n?my/n/GH:cys,n/(GW*GH));
+}
+function feed(n,cxn,cyn,area){
+  const dcx=n>=3?cxn-prevCx:0;if(n>=3)prevCx=cxn;
+  if(n>=2){cxs+=(cxn-cxs)*.15;cys+=(cyn-cys)*.15}
+  const now=performance.now();
+  let tl=0,tt=0,tw=0;
+  if(area>.1){tl=Math.min(1,area*2.5)}
+  else if(area>.012&&Math.abs(dcx)>.022&&now-lastThrow>700){
+    lastThrow=now;tt=1;launch(cxn,cyn,Math.sign(dcx),Math.min(1,Math.abs(dcx)*14));
+  }else if(n>=2&&area<.035&&Math.abs(dcx)<.02){tw=Math.min(1,n/18);
+    if(now-lastWr>140){lastWr=now;wrist(cxn*W,cyn*H,tw)}}
+  lat+=(tl-lat)*.07;vxs+=((area>.1?dcx*70:0)-vxs)*.1;thr=Math.max(tt,thr*.94);wr+=(tw-wr)*.15;
+}
+function wrist(x,y,k){pulses.push({x,y,t:0,a:8+k*14,f:.09,s:240,life:1.6});spore(x,y,2)}
+function spore(x,y,n){for(let i=0;i<n&&spores.length<90;i++){const a=Math.random()*6.28,v=20+Math.random()*90;spores.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-20,l:1+Math.random()*2,m:3,r:1.5+Math.random()*3})}}
+function launch(cxn,cyn,dir,pw){
+  ball={x:cxn*W,y:Math.max(H*.2,Math.min(H*.8,cyn*H)),vx:dir*(Math.max(W,500)*.7+pw*500),vy:(Math.random()-.5)*Math.min(H,400)*.5,tr:[],life:7};
+  pulses.push({x:ball.x,y:ball.y,t:0,a:46,f:.035,s:420,life:2.2});spore(ball.x,ball.y,16);kick+=.5;
+}
+function bounce(){pulses.push({x:ball.x,y:ball.y,t:0,a:60,f:.04,s:460,life:2.4});spore(ball.x,ball.y,12);kick+=.15}
+
+async function startCam(){
+  try{
+    const st=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}});
+    vid.srcObject=st;await vid.play();useCam=true;begin();
+  }catch(e){begin();note('La cámara no está disponible aquí ('+((e&&e.name)||'sin permiso')+'). Abre el enlace directamente en el navegador del celular (Safari o Chrome) y acepta el permiso de cámara. Mientras tanto puedes jugar con el dedo.')}
+}
+function begin(){document.getElementById('intro').style.display='none';document.getElementById('hud').style.display='flex'}
+function note(t){const n=document.getElementById('note');n.textContent=t;n.style.display='block';setTimeout(()=>n.style.display='none',12000)}
+go.onclick=startCam;demo.onclick=begin;
+
+let pd=null,lx=null;
+const introOn=()=>document.getElementById('intro').style.display!=='none';
+cv.addEventListener('pointerdown',e=>{if(useCam||introOn())return;pd={t:performance.now(),moved:0};lx=e.clientX});
+cv.addEventListener('pointermove',e=>{
+  if(useCam||introOn())return;
+  const x=e.clientX,y=e.clientY,dx=lx===null?0:x-lx;lx=x;const mv=Math.abs(dx);
+  if(pd)pd.moved+=mv;
+  if(mv>9){cxs+=(x/W-cxs)*.25;cys=y/H;lat+=(Math.min(1,mv/30)-lat)*.25;vxs+=(dx/W*70-vxs)*.2}
+  else if(mv>.3&&performance.now()-lastWr>140){lastWr=performance.now();wr=Math.min(1,wr+.3);wrist(x,y,.6)}
+});
+addEventListener('pointerup',e=>{
+  if(pd&&!useCam&&pd.moved<12&&performance.now()-pd.t<350){launch(e.clientX/W,e.clientY/H,e.clientX<W/2?1:-1,.6);thr=1}
+  pd=null;lx=null;
+});
+
+const sstep=(a,b,x)=>{x=Math.max(0,Math.min(1,(x-a)/(b-a)));return x*x*(3-2*x)};
+const lerpHue=(a,b,t)=>a+(((b-a+540)%360)-180)*t;
+function disp(x,y){
+  let d=0;
+  for(const p of pulses){
+    const dx=x-p.x,dy=y-p.y,r=Math.sqrt(dx*dx+dy*dy),fr=p.t*p.s;
+    d+=p.a*Math.exp(-Math.pow((r-fr)/90,2)-p.t/p.life*2)*Math.sin((r-fr)*p.f);
+  }
+  return d;
+}
+const FN=[
+ (i,u)=>{px=u*W;py=cy+(i-N/2)*gap+A*Math.sin(u*W*.05+phase+i*.16+T*.4)},
+ (i,u)=>{const ccx=cx+Math.cos(i*2.4+T*.07*(1+i%3))*W*.36,ccy=cy+Math.sin(i*1.7+T*.06*(1+i%2))*H*.34,rad=R*(.1+.2*((i*7)%5)/5),th=u*6.2832,r=rad*(1+.18*Math.sin(5*th+phase*2+i));px=ccx+r*Math.cos(th);py=ccy+r*Math.sin(th)},
+ (i,u)=>{const ang=(i/(N-1)-.5)*2.2,len=H*.82*(.55+.45*((i*5)%7)/7);px=cx+Math.sin(ang)*u*len*.9+Math.sin(u*9+i+phase)*u*28;py=H*.93-Math.cos(ang*.7)*u*len+Math.cos(u*7+i)*u*14},
+ (i,u)=>{const a0=i/N*6.2832,th=a0+u*3.2+phase*.3,rr=u*R*(.55+.45*Math.abs(Math.sin(5*a0+u*4+T*.3)));px=cx+rr*Math.cos(th);py=cy+rr*Math.sin(th)},
+ (i,u)=>{const nb=14;if(i<nb){const h=i/nb,sc=1-h*.85;px=cx-R*sc*Math.cos(Math.PI*u);py=cy-R*.1-R*.8*sc*Math.sin(Math.PI*u)*(1+.12*Math.sin(T*2+h*3))}else{const k=i-nb,K=N-nb;px=cx+(k/(K-1)-.5)*R*1.5+Math.sin(u*9-T*2+k)*u*R*.25;py=cy-R*.1+u*H*.38}}
+];
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;T=now/1000;
+  if(useCam)analyse();else{lat*=.97;vxs*=.95;wr*=.9;thr*=.94}
+  s+=dt*(.03+lat*.22+wr*.05+kick*2);kick*=.97;
+  const f=Math.floor(s)%5,g=(f+1)%5,b=sstep(.3,.95,s%1);
+  if(f!==lastF){lastF=f;st.textContent=NAMES[f]+' → '+NAMES[g]}
+  phase+=dt*(.5+lat*2.5)*(vxs>=0?1:-1)*(1+Math.abs(vxs)*.25);
+  cx=W/2+(cxs-.5)*W*.3;cy=H/2;R=Math.min(W,H)*.42;gap=Math.min(H/(N+4),16);A=12+lat*36+wr*8;
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='rgba(5,6,12,.2)';ctx.fillRect(0,0,W,H);
+  if(useCam){ctx.save();ctx.globalAlpha=.06;ctx.translate(W,0);ctx.scale(-1,1);ctx.drawImage(vid,0,0,W,H);ctx.restore()}
+  ctx.globalCompositeOperation='lighter';
+  ctx.lineWidth=1.2;
+  const F0=FN[f],F1=FN[g],h0=HU[f],h1=HU[g];
+  for(let i=0;i<N;i++){
+    ctx.beginPath();
+    ctx.strokeStyle='hsla('+(lerpHue(h0,h1,b)+i*1.8+lat*40+thr*30)+',85%,'+(60+thr*18)+'%,'+(.4+lat*.2)+')';
+    for(let j=0;j<=M;j++){
+      const u=j/M;F0(i,u);let x=px,y=py;
+      if(b>.001){F1(i,u);x+=(px-x)*b;y+=(py-y)*b}
+      const d=disp(x,y);y+=d;x+=d*.35;
+      j?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.stroke();
+  }
+  pulses=pulses.filter(p=>(p.t+=dt)<p.life);
+  const sh=lerpHue(h0,h1,b);
+  for(const p of spores){p.l-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.985;p.vy=p.vy*.985-8*dt;
+    ctx.fillStyle='hsla('+(sh+40)+',90%,75%,'+Math.max(0,Math.min(1,p.l/p.m))*.8+')';
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,7);ctx.fill()}
+  spores=spores.filter(p=>p.l>0);
+  if(ball){
+    ball.life-=dt;ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+    if(ball.x<20||ball.x>W-20){ball.vx*=-1;ball.x=Math.max(20,Math.min(W-20,ball.x));bounce()}
+    if(ball.y<20||ball.y>H-20){ball.vy*=-1;ball.y=Math.max(20,Math.min(H-20,ball.y));bounce()}
+    ball.tr.push([ball.x,ball.y]);if(ball.tr.length>24)ball.tr.shift();
+    const al=Math.min(1,ball.life);
+    for(let i=0;i<ball.tr.length;i++){const q=ball.tr[i],fr=i/ball.tr.length;
+      ctx.fillStyle='rgba(255,240,210,'+fr*.45*al+')';ctx.beginPath();ctx.arc(q[0],q[1],2+fr*5,0,7);ctx.fill()}
+    const gr=ctx.createRadialGradient(ball.x,ball.y,0,ball.x,ball.y,28);
+    gr.addColorStop(0,'rgba(255,250,235,'+al+')');gr.addColorStop(1,'rgba(255,200,120,0)');
+    ctx.fillStyle=gr;ctx.beginPath();ctx.arc(ball.x,ball.y,28,0,7);ctx.fill();
+    if(ball.life<=0)ball=null;
+  }
+  bl.style.width=lat*100+'%';bt.style.width=thr*100+'%';bw.style.width=wr*100+'%';
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
